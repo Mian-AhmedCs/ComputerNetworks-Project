@@ -24,7 +24,7 @@
 
 1. Navigate to the project directory:
    ```
-   cd Cn-project-realtime
+   cd ComputerNetworks-Project
    ```
 
 2. Install Python dependencies:
@@ -57,7 +57,7 @@
 ## Project Structure
 
 ```
-Cn-project-realtime/
+ComputerNetworks-Project/
 ├── app.py                  # Flask backend application
 ├── sniffer.py              # Scapy packet capture module
 ├── requirements.txt        # Python dependencies
