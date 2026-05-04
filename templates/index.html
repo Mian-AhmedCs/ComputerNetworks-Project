@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Traffic Vision — Real-time network packet capture, filtering, and analysis.">
+    <title>Traffic Vision</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+</head>
+<body>
+
+    <!-- ─── Navigation ──────────────────────────────────── -->
+    <nav id="apple-nav">
+        <div class="nav-inner">
+            <div class="nav-brand">
+                <svg class="nav-logo" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/>
+                    <path d="M2 12h4m12 0h4M12 2v4m0 12v4" opacity="0.5"/>
+                </svg>
+                <span class="nav-title">Traffic Vision</span>
+                <span class="nav-tagline">Real-time Network Analysis</span>
+            </div>
+            <div class="nav-right">
+                <span id="packet-count" class="packet-counter">{{ packet_total }} packets</span>
+                <span id="status-badge" class="status-pill {{ 'status-active' if is_running else 'status-inactive' }}">
+                    <span class="status-dot"></span>
+                    <span id="status-text">{{ "Monitoring" if is_running else "Inactive" }}</span>
+                </span>
+            </div>
+        </div>
+    </nav>
+
+    <main id="app-main">
+
+        <!-- ─── Unified Control + Filter Toolbar ──────── -->
+        <div id="toolbar">
+            <form id="ctrl-form" method="post">
+
+                <!-- Row 1: Interface + Action Buttons -->
+                <div class="toolbar-row">
+                    <div class="toolbar-group">
+                        <span class="toolbar-label">Interface</span>
+                        <div class="select-wrapper">
+                            <select id="interface-dropdown" name="interface" title="Network Interface">
+                                <option value="default">Default Interface</option>
+                                {% for iface in interfaces %}
+                                <option value="{{ iface }}">{{ iface }}</option>
+                                {% endfor %}
+                            </select>
+                            <svg class="select-chevron" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+                        </div>
+                    </div>
+
+                    <div class="toolbar-divider"></div>
+
+                    <div class="toolbar-group">
+                        <button id="btn-start" type="submit" formaction="/start" class="apple-btn apple-btn-blue apple-btn-sm" {{ 'disabled' if is_running }}>
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><polygon points="6,3 20,12 6,21"/></svg>
+                            Start Monitoring
+                        </button>
+                        <button id="btn-stop" type="submit" formaction="/stop" class="apple-btn apple-btn-outline apple-btn-sm" {{ 'disabled' if not is_running }}>
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><rect x="5" y="5" width="14" height="14" rx="2"/></svg>
+                            Stop
+                        </button>
+                        <button type="submit" formaction="/clear" class="apple-btn apple-btn-ghost apple-btn-sm">Clear</button>
+                        <button type="submit" formaction="/export" class="apple-btn apple-btn-ghost apple-btn-sm">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                            Export CSV
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Row 2: Filters -->
+                <div class="toolbar-row">
+                    <div class="toolbar-group">
+                        <span class="toolbar-label">Filter</span>
+                        <div class="select-wrapper">
+                            <select id="filter-protocol" name="protocol" title="Protocol Filter">
+                                <option value="ALL" {{ 'selected' if filters.protocol == 'ALL' }}>All Protocols</option>
+                                <option value="TCP" {{ 'selected' if filters.protocol == 'TCP' }}>TCP</option>
+                                <option value="UDP" {{ 'selected' if filters.protocol == 'UDP' }}>UDP</option>
+                                <option value="ICMP" {{ 'selected' if filters.protocol == 'ICMP' }}>ICMP</option>
+                            </select>
+                            <svg class="select-chevron" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+                        </div>
+                        <input type="text" id="filter-src-ip" name="src_ip" class="apple-input"
+                               placeholder="Source IP" value="{{ filters.src_ip }}">
+                        <input type="text" id="filter-dst-ip" name="dst_ip" class="apple-input"
+                               placeholder="Destination IP" value="{{ filters.dst_ip }}">
+                    </div>
+                    <div class="toolbar-group">
+                        <button type="submit" formaction="/filter" class="apple-btn apple-btn-sm apple-btn-blue">Apply Filter</button>
+                        <button type="submit" formaction="/reset-filter" class="apple-btn apple-btn-sm apple-btn-ghost">Reset</button>
+                    </div>
+                </div>
+
+            </form>
+        </div>
+
+
+        <!-- ─── Dashboard Grid ─────────────────────────── -->
+        <div id="dashboard">
+
+            <!-- Left column: Stats + Logs -->
+            <aside id="side-panel">
+                <div class="panel-card">
+                    <div class="panel-head">
+                        <span class="panel-title">Statistics</span>
+                    </div>
+                    <div id="stats-content" class="stats-grid-compact">
+                        <div class="stat-tile stat-highlight-blue"><div class="stat-number">{{ stats.total_packets }}</div><div class="stat-caption">Total Packets</div></div>
+                        <div class="stat-tile stat-highlight-green"><div class="stat-number">{{ stats.tcp_count }}</div><div class="stat-caption">TCP</div></div>
+                        <div class="stat-tile stat-highlight-yellow"><div class="stat-number">{{ stats.udp_count }}</div><div class="stat-caption">UDP</div></div>
+                        <div class="stat-tile stat-highlight-orange"><div class="stat-number">{{ stats.icmp_count }}</div><div class="stat-caption">ICMP</div></div>
+                        <div class="stat-tile"><div class="stat-number">{{ stats.other_count }}</div><div class="stat-caption">Other</div></div>
+                        <div class="stat-tile stat-highlight-purple"><div class="stat-number">{{ format_bytes(stats.avg_packet_size) }}</div><div class="stat-caption">Avg Packet Size</div></div>
+                        <div class="stat-tile stat-highlight-cyan"><div class="stat-number">{{ format_bytes(stats.total_data_size) }}</div><div class="stat-caption">Total Data</div></div>
+                    </div>
+                </div>
+
+                <div class="panel-card log-panel">
+                    <div class="panel-head">
+                        <span class="panel-title">System Logs</span>
+                    </div>
+                    <div id="log-content" class="log-box">
+                        {% if logs %}
+                        {% for log in logs %}<div class="log-entry">{{ log }}</div>{% endfor %}
+                        {% else %}<p class="log-empty">No log entries yet.</p>{% endif %}
+                    </div>
+                </div>
+            </aside>
+
+            <!-- Right column: Packets Table -->
+            <section id="packet-table-section" class="panel-card">
+                <div class="panel-head">
+                    <span class="panel-title">Captured Packets</span>
+                </div>
+                <div class="table-wrap">
+                    <table id="packet-table">
+                        <thead>
+                            <tr>
+                                <th>#</th><th>Time</th><th>Source IP</th><th>Destination IP</th>
+                                <th>Protocol</th><th>Src Port</th><th>Dst Port</th><th>Service</th><th>Size</th>
+                            </tr>
+                        </thead>
+                        <tbody id="packet-tbody">
+                            {% if packets %}
+                            {% for p in packets %}
+                            <tr>
+                                <td>{{ packet_total - loop.index0 }}</td><td>{{ p.time }}</td><td>{{ p.src_ip }}</td><td>{{ p.dst_ip }}</td>
+                                <td><span class="proto-badge {% if p.protocol == 'TCP' %}proto-tcp{% elif p.protocol == 'UDP' %}proto-udp{% elif p.protocol == 'ICMP' %}proto-icmp{% else %}proto-other{% endif %}">{{ p.protocol }}</span></td>
+                                <td>{{ p.src_port }}</td><td>{{ p.dst_port }}</td><td>{{ p.service }}</td><td>{{ p.packet_size }}</td>
+                            </tr>
+                            {% endfor %}
+                            {% else %}
+                            <tr class="empty-row"><td colspan="9">No packets captured yet. Click "Start Monitoring" to begin.</td></tr>
+                            {% endif %}
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+        </div><!-- /dashboard -->
+
+    </main>
+
+    <!-- ─── Vanilla JS: no-reload actions + live polling ── -->
+    <script>
+    (function() {
+        var qs = location.search;
+
+        // ── Live polling every 2s ────────────────────────────────────
+        function poll() {
+            fetch("/api/live" + qs)
+                .then(function(r) { return r.json(); })
+                .then(function(d) {
+                    document.getElementById("stats-content").innerHTML = d.stats;
+                    document.getElementById("packet-tbody").innerHTML  = d.packets;
+                    document.getElementById("log-content").innerHTML   = d.logs;
+                    document.getElementById("packet-count").textContent = d.packet_count;
+                    var badge = document.getElementById("status-badge");
+                    badge.className = "status-pill " + (d.is_running ? "status-active" : "status-inactive");
+                    document.getElementById("status-text").textContent = d.is_running ? "Monitoring" : "Inactive";
+                    document.getElementById("btn-start").disabled =  d.is_running;
+                    document.getElementById("btn-stop").disabled  = !d.is_running;
+                })
+                .catch(function() {});
+        }
+        setInterval(poll, 2000);
+
+        // ── Toast helper ─────────────────────────────────────────────
+        function showToast(msg, type) {
+            var t = document.createElement("div");
+            t.className = "toast toast-" + (type || "success") + " toast-animate";
+            t.textContent = (type === "error" ? "⚠️ " : "✅ ") + msg;
+            document.body.appendChild(t);
+            setTimeout(function() { if (t.parentNode) t.parentNode.removeChild(t); }, 4000);
+        }
+
+        // ── Intercept every form submission ──────────────────────────
+        document.querySelectorAll("form").forEach(function(form) {
+            form.addEventListener("submit", function(e) {
+                e.preventDefault();
+
+                var btn    = e.submitter;
+                var action = (btn && btn.getAttribute("formaction")) || form.getAttribute("action") || "/";
+                var data   = new FormData(form);
+
+                fetch(action, { method: "POST", body: data, redirect: "follow" })
+                    .then(function(r) {
+
+                        // ── Filter applied: update qs + URL ──────────────────
+                        if (action === "/filter") {
+                            var p = new URLSearchParams();
+                            var proto = data.get("protocol"), src = data.get("src_ip"), dst = data.get("dst_ip");
+                            if (proto && proto !== "ALL") p.set("protocol", proto);
+                            if (src)  p.set("src_ip", src);
+                            if (dst)  p.set("dst_ip", dst);
+                            qs = p.toString() ? "?" + p.toString() : "";
+                            history.replaceState(null, "", "/" + qs);
+                        }
+
+                        // ── Filter reset: clear qs + visible inputs + URL ────
+                        if (action === "/reset-filter") {
+                            qs = "";
+                            history.replaceState(null, "", "/");
+                            var proto = document.getElementById("filter-protocol");
+                            var srcEl = document.getElementById("filter-src-ip");
+                            var dstEl = document.getElementById("filter-dst-ip");
+                            if (proto) proto.value = "ALL";
+                            if (srcEl) srcEl.value = "";
+                            if (dstEl) dstEl.value = "";
+                        }
+
+                        // ── Show toast from redirect URL if present ──────────
+                        if (r.url) {
+                            var u     = new URL(r.url);
+                            var toast = u.searchParams.get("toast");
+                            var ttype = u.searchParams.get("toast_type") || "success";
+                            if (toast) showToast(toast, ttype);
+                        }
+
+                        // Immediately refresh UI without waiting for next poll
+                        poll();
+                    })
+                    .catch(function() {});
+            });
+        });
+
+    })();
+    </script>
+</body>
+</html>
